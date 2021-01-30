@@ -1,0 +1,137 @@
+(*--The two public channel--*)
+free ch1: channel.
+free ch2: channel.
+
+(*--The basic type--*)
+type entity.
+type nonce.
+type key.
+
+(*--Hash operation--*) 
+fun h(bitstring): bitstring.
+
+(*--XOR operation--*)
+fun XOR(bitstring, bitstring): bitstring.
+equation forall x: bitstring, y: bitstring;
+XOR(XOR(x, y), y) = x.
+
+(* Injbot operation *)
+fun injbot(cleartext): bitstringbot [data].
+
+(*--Concat operation--*)
+fun Con(bitstring, bitstring): bitstring.
+
+(*--Shared key encryption--*)
+fun Enc(bitstring,key): bitstring.
+reduc forall x: bitstring, y: key;
+Dec(Enc(x,y),y) = x.
+
+(*--Type convertion--*)
+fun nontobit(nonce): bitstring             [data,typeConverter].
+fun bittokey(bitstring): key                 [data,typeConverter].
+fun bottostring(bitstringbot): bitstring   [data,typeConverter].
+
+(*--Secrecy assumptions
+not attacker(new k).--*)
+
+(*--The basic variables--*)
+free MU, FA, HA: entity.    (*---three entities in the proposed scheme--*)
+free d: bitstring[private].    (*---private key--*)
+free y: bitstring[private].    (*---private key--*)
+free KFA: bitstring[private]. (*---private key--*)
+
+free T: bitstring.              
+free U: bitstring.              
+free W: bitstring.              
+free MAC1: bitstring.              
+
+(*--Authentication queries--*)
+event UFbegin(entity).
+event UFend(entity).
+event FUbegin(entity).
+event FUend(entity).
+
+query t: entity; inj-event(UFend(t)) ==> inj-event(UFbegin(t)).
+query t: entity; inj-event(FUend(t)) ==> inj-event(FUbegin(t)).
+
+(*--Queries--*)
+free svalueA, svalueB: bitstring [private].
+query attacker(svalueA);
+        attacker(svalueB).
+
+(*--Role of the MU with identity IDMU and password PWMU--*)
+let processMU(IDMU: bitstring, PWMU: bitstring, ZMU: bitstring, AMU: bitstring, BMU: bitstring, CMU: bitstring, IDHA: bitstring, IDFA: bitstring) =
+        let (xFMU: bitstring) = XOR(ZMU, h(Con(IDMU, PWMU))) in
+        let (xAi: bitstring) = h(xFMU) in
+        if xAi = Ai then
+                event FUbegin(FA);
+                new RMU: nonce;
+                let (U: bitstring) = XOR(BMU, nontobit(RMU)) in
+                let (V: bitstring) = XOR(CMU, nontobit(RMU)) in
+                let (W: bitstring) = XOR(xFMU, nontobit(RMU)) in
+                let (MAC1: bitstring) = h(Con(Con(Con(Con(Con(xFMU, nontobit(RMU)), U), V), W), IDFA)) in
+(*UF1*) out(ch1, (IDHA, U, V, W, MAC1, true));  
+(*FU1*) in(ch1, (MAC4: bitstring, RFA: nonce));
+        let (xxSK: bitstring) = h(Con(Con(xFMU, nontobit(RMU)), nontobit(RFA))) in
+        let (xMAC4: bitstring) = h(Con(Con(U, xxSK), nontobit(RFA))) in
+        if xMAC4 = MAC4 then
+                event UFend(MU);
+                out(ch1, Enc(svalueA, bittokey(xxSK))).
+
+(*--Role of the FA with identity IDFA--*)
+let processFA(IDFA: bitstring, KFH: bitstring) = 
+        in(ch1, (IDHA: bitstring, U: bitstring, V: bitstring, W: bitstring, MAC1: bitstring));    
+        new RFA: nonce;
+        let (CFA: bitstring) = Enc(Con(Con(Con(IDHA, U), V), W), MAC1), bittokey(KFH)) in
+        let (MAC2: bitstring) = h(Con(IDFA, CFA)) in
+        event UFbegin(MU);
+(*FH1*) out(ch2, (IDFA, CFA, MAC2, true));  
+(*HF1*) in(ch2, (CHA: bitstring, MAC3: bitstring));
+        let (xSK: bitstring) = Dec(CHA, KFH) in
+        let (xMAC3: bitstring) = h(Con(Con(IDHA, xSK), nontobit(RFA))) in
+        if xMAC3 = MAC3 then
+                event FUend(FA);
+                let (MAC4: bitstring) = h(Con(Con(U, xSK), nontobit(RFA))) in
+(*FU1*) out(ch1, (MAC4, RFA, true));
+                out(ch1, Enc(svalueB, bittokey(xSK))).	
+	  
+(*--Role of the HA--*)
+let processHA(IDHA: bitstring, KFH: bitstring) =     
+        in(ch2, (IDFA: bitstring, CFA: bitstring, MAC2: bitstring));     
+        let (xMAC2: bitstring) = h(Con(IDFA, CFA)) in
+        if xMAC2 = MAC2 then
+                let (injbot(Con(Con(Con(Con(xIDHA: bitstringbot, xU: bitstringbot), xV: bitstringbot), xW: bitstringbot, xMAC1: bitstringbot)))) = Dec(CFA, KFH) in
+                let (R1R: bitstring) = XOR(XOR(XOR(xU, xV), h(d)), h(Con(d, y))) in
+                let (xRMU: bitstring) = XOR(xW, R1R) in
+                let (xxMAC1: bitstring) = h(Con(Con(Con(Con(Con(R1R, xRMU), xU), xV), xW), IDFA)) in
+                if xxMAC1 = xMAC1 then
+                        let (SK: bitstring) = h(Con(Con(R1R, xRMU), RFA)) in
+                        let (CHA: bitstring) = Enc(SK, KFH) in
+                        let (MAC3: bitstring) = h(Con(Con(IDHA, SK), RFA)) in
+(*HF1*) out(ch2, (CHA, MAC3, true)).  
+
+(*--Start process--*)
+process
+(
+	new IDMU: bitstring; 
+	new IDFA: bitstring; 
+	new IDHA: bitstring; 
+	new PWMU: bitstring;
+	new N: bitstring;
+
+	let (R1: bitstring) = h(Con(IDMU, N)) in
+	let (R: bitstring) = h(Con(Con(R1, IDHA), d)) in
+	let (BMU: bitstring) = XOR(R1, h(d)) in
+	let (CMU: bitstring) = XOR(R, h(Con(d, y))) in
+	let (FMU: bitstring) = XOR(R1, R) in
+
+	let (ZMU: bitstring) = XOR(FMU, h(Con(IDMU, PWMU))) in
+	let (AMU: bitstring) = h(FMU) in
+
+          (*-- Launch an unbounded number of sessions of the mobile user --*)
+          (!processMU(IDMU, PWMU, ZMU, AMU, BMU, CMU, IDHA, IDFA)) | 
+          (*-- Launch an unbounded number of sessions of the FA--*)
+          (!processFA(IDFA, KFH) |
+          (*-- Launch an unbounded number of sessions of the HA--*)
+          (!processHA(IDHA, KFH)) 
+)
